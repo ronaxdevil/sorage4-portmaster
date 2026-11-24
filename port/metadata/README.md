@@ -1,7 +1,6 @@
 ## Notes
 
 Thanks to Dotemu, Lizardcube, and Guard Crush Games for creating Streets of Rage 4, a hand-drawn beat ’em up set in Wood Oak City, and to Playdigious for the Android edition. PortMaster adaptation by Ronax. [Game credits](https://www.dotemu.com/PressKit/project/Games/Streets%20of%20Rage%204)
-
 Thanks to NextOS for the upstream startup code used by this port.
 
 ## Get the APK
