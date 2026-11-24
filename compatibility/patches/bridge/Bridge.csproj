@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <AssemblyName>SOR4Bridge</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Mono.Android" HintPath="$(PortableRuntime)/Mono.Android.dll" />
+    <Reference Include="Java.Interop" HintPath="$(PortableRuntime)/Java.Interop.dll" />
+  </ItemGroup>
+</Project>

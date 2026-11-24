@@ -1,0 +1,35 @@
+#!/bin/bash
+set -euo pipefail
+if [ "$#" -ne 3 ]; then
+  echo "Usage: $0 GLIBC_SYSROOT SDL_SYSROOT OUTPUT_SO" >&2
+  exit 2
+fi
+src=$(cd -- "$(dirname -- "$0")/../compatibility/audio" && pwd -P)
+sysroot=$(realpath "$1")
+sdl=$(realpath "$2")/usr
+output=$3
+cc=aarch64-linux-gnu-gcc
+triplet=aarch64-linux-gnu
+atomic_flags=()
+target_options=$("$cc" --help=target)
+if [[ "$target_options" == *-moutline-atomics* ]]; then
+  atomic_flags+=(-mno-outline-atomics)
+fi
+
+"$cc" --sysroot="$sysroot" -nostdinc -isystem "$("$cc" -print-file-name=include)" \
+  -isystem "$sysroot/usr/include/$triplet" -isystem "$sysroot/usr/include" \
+  -I "$sdl/include" -I "$sdl/include/$triplet" -D_GNU_SOURCE \
+  -O2 -fPIC "${atomic_flags[@]}" -fno-omit-frame-pointer -shared -nostdlib \
+  -Wl,-E -Wl,--build-id=sha1 -L "$sdl/lib/$triplet" \
+  -L "$sysroot/usr/lib/$triplet" -L "$sysroot/lib/$triplet" \
+  -o "$output" \
+  "$src"/{android_shim,bionic_shims,error,imports.gen,jni_shim,opensles_shim,pthread_fake,sem_shim,so_util,util,wwise_native}.c \
+  -l:libSDL2-2.0.so.0 -l:libdl.so.2 -l:libm.so.6 -l:libpthread.so.0 -lc -lgcc
+
+max_glibc=$(aarch64-linux-gnu-readelf --version-info "$output" | \
+  sed -n 's/.*Name: GLIBC_\([0-9.]*\).*/\1/p' | sort -Vu | tail -1)
+if [ -z "$max_glibc" ] || [ "$(printf '%s\n' 2.29 "$max_glibc" | sort -V | tail -1)" != 2.29 ]; then
+  echo "Audio bridge requires unexpected glibc version ${max_glibc:-unknown}." >&2
+  exit 1
+fi
+echo "Audio bridge glibc requirement is $max_glibc."

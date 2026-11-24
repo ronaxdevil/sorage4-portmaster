@@ -1,0 +1,25 @@
+#!/bin/bash
+set -eu
+src=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
+textures="$src/compatibility/textures"
+out=$(realpath -m "$1")
+arch=${2:-aarch64}
+mkdir -p "$out"
+case "$arch" in
+  aarch64) cc=aarch64-linux-gnu-gcc; cxx=aarch64-linux-gnu-g++; isa=NEON; suffix=neon ;;
+  x86_64) cc=gcc; cxx=g++; isa=SSE2; suffix=sse2 ;;
+  *) echo "Unsupported build architecture $arch" >&2; exit 2 ;;
+esac
+cmake -S "$src/vendor/astc-encoder" -B "$out/astc-$arch" -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_C_COMPILER="$cc" -DCMAKE_CXX_COMPILER="$cxx" -DCMAKE_SYSTEM_PROCESSOR="$arch" \
+  -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCLI=OFF "-DISA_$isa=ON"
+cmake --build "$out/astc-$arch" --parallel "${BUILD_JOBS:-4}"
+"$cc" -O3 -fPIC -c "$src/vendor/lz4/lz4.c" -o "$out/lz4-$arch.o"
+"$cxx" -std=c++17 -O3 -fPIC -shared -static-libstdc++ -static-libgcc \
+  -I "$src/vendor/astc-encoder/Source" "$textures/astc_repack.cpp" \
+  "$out/astc-$arch/Source/libastcenc-$suffix-static.a" "$out/lz4-$arch.o" \
+  -o "$out/libastc-repack.$arch.so"
+"$cxx" -std=c++17 -O3 -fPIC -shared -static-libstdc++ -static-libgcc \
+  -I "$src/vendor/astc-encoder/Source" -I "$src/vendor/aosp-etc1" \
+  "$textures/texture-codec.cpp" "$src/vendor/aosp-etc1/etc1.cpp" \
+  "$out/astc-$arch/Source/libastcenc-$suffix-static.a" -o "$out/libsorage4astc.so"

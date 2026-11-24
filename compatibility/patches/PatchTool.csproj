@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <UseAppHost>false</UseAppHost>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>$(PatchTool)</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(PatchTool)/Program.cs" />
+    <Reference Include="Mono.Cecil" HintPath="$(CecilPath)" />
+  </ItemGroup>
+</Project>
