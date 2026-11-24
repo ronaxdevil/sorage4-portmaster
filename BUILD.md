@@ -45,13 +45,15 @@ Run all commands from the **root of this repository** (where `build.sh` lives) o
 | Environment variable | Description |
 | --- | --- |
 | `ARM_GLIBC_SYSROOT` | ARM64 sysroot with glibc ≤ 2.29 headers and libs (e.g. Bootlin AArch64 glibc stable 2018.11-1) |
-| `ARM_SDL_SYSROOT` | ARM64 sysroot containing SDL2 headers and `libSDL2-2.0.so.0` |
+| `ARM_SDL_SYSROOT` | Isolated ARM64 sysroot containing SDL2 headers and `libSDL2-2.0.so.0` (must not contain host glibc) |
 
 ### Optional environment variables
 
 | Variable | Purpose |
 | --- | --- |
-| `DOTNET` | Absolute path to `dotnet` if not on `PATH` |
+| `DOTNET` | Absolute path to `dotnet` binary (e.g. `$HOME/.dotnet/dotnet`) |
+| `DOTNET_ROOT` | Path to .NET SDK directory (e.g. `$HOME/.dotnet`) |
+| `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT` | Set to `1` if `libicu` is not installed on the build machine |
 | `PORT_NATIVE_ARCHIVES` | Directory with pre-downloaded `ffmpeg.tar.gz`, `harfbuzz.tar.xz`, `freetype.tar.xz` |
 | `PORT_SOURCE_MIRROR` | Directory with pre-cloned repos named `cecil`, `nvorbis`, `stb-image`, `stb-write` |
 | `ANDROID_SDK_PACKAGE` | Path to the pre-downloaded `microsoft.android.runtime.35.android-arm64.35.0.92.nupkg` |
@@ -62,7 +64,7 @@ Run all commands from the **root of this repository** (where `build.sh` lives) o
 
 ## Install Dependencies
 
-### Linux (Ubuntu / Debian)
+### Linux / WSL (Ubuntu / Debian)
 
 ```bash
 sudo apt-get update
@@ -76,31 +78,66 @@ sudo apt-get install -y \
 wget https://dot.net/v1/dotnet-install.sh -O /tmp/dotnet-install.sh
 chmod +x /tmp/dotnet-install.sh
 /tmp/dotnet-install.sh --version 9.0 --install-dir "$HOME/.dotnet"
-echo 'export PATH="$HOME/.dotnet:$PATH"' >> ~/.bashrc
+
+# Configure .NET environment variables
+export DOTNET="$HOME/.dotnet/dotnet"
+export DOTNET_ROOT="$HOME/.dotnet"
 export PATH="$HOME/.dotnet:$PATH"
-dotnet --version
-```
-
-### WSL (Ubuntu / Debian)
-
-```bash
-sudo apt-get update
-sudo apt-get install -y \
-  git curl xz-utils tar make cmake pkg-config chrpath \
-  gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
-  binutils-aarch64-linux-gnu \
-  python3 python3-pip ca-certificates
-
-# .NET 9 SDK
-wget https://dot.net/v1/dotnet-install.sh -O /tmp/dotnet-install.sh
-chmod +x /tmp/dotnet-install.sh
-/tmp/dotnet-install.sh --version 9.0 --install-dir "$HOME/.dotnet"
-echo 'export PATH="$HOME/.dotnet:$PATH"' >> ~/.bashrc
-export PATH="$HOME/.dotnet:$PATH"
+export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
 dotnet --version
 ```
 
 > **WSL Note:** The build directory **must** be on a Linux filesystem (e.g. `~/build/`) — not on a Windows mount like `/mnt/c/`. Linux symlinks are required by the native build.
+
+### Sysroot and Toolchain Setup (for Mode 4 `all`)
+
+#### 1. ARM64 glibc sysroot (`ARM_GLIBC_SYSROOT`) via Bootlin
+
+Download the pinned Bootlin toolchain targeting glibc 2.27 (≤ 2.29):
+
+```bash
+cd ~
+wget https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--glibc--stable-2018.11-1.tar.bz2
+tar -xjf aarch64--glibc--stable-2018.11-1.tar.bz2
+
+BOOTLIN="$HOME/aarch64--glibc--stable-2018.11-1"
+SYSROOT="$BOOTLIN/aarch64-buildroot-linux-gnu/sysroot"
+
+# Create aarch64-linux-gnu-* symlinks directly inside Bootlin bin/
+# (Must reside in Bootlin's bin/ so the toolchain-wrapper resolves .br_real properly)
+cd "$BOOTLIN/bin"
+for f in aarch64-linux-*; do
+  target=$(echo "$f" | sed "s/aarch64-linux-/aarch64-linux-gnu-/")
+  [ -e "$target" ] || ln -s "$f" "$target"
+done
+
+# Create triplet symlinks in sysroot so -L finds libraries
+mkdir -p "$SYSROOT/lib/aarch64-linux-gnu" "$SYSROOT/usr/lib/aarch64-linux-gnu"
+for item in "$SYSROOT/lib"/*; do
+  [ "$(basename "$item")" != "aarch64-linux-gnu" ] && ln -sf "../$(basename "$item")" "$SYSROOT/lib/aarch64-linux-gnu/"
+done
+for item in "$SYSROOT/usr/lib"/*; do
+  [ "$(basename "$item")" != "aarch64-linux-gnu" ] && ln -sf "../$(basename "$item")" "$SYSROOT/usr/lib/aarch64-linux-gnu/"
+done
+```
+
+#### 2. Isolated ARM64 SDL2 sysroot (`ARM_SDL_SYSROOT`)
+
+Install ARM64 SDL2 via multiarch and copy only SDL2 components to an isolated sysroot folder:
+
+```bash
+sudo dpkg --add-architecture arm64
+sudo apt-get update
+sudo apt-get install -y libsdl2-dev:arm64
+
+# Stage isolated SDL2 sysroot (prevents host glibc contamination during build)
+mkdir -p ~/arm64-sdl-sysroot/usr/include/aarch64-linux-gnu ~/arm64-sdl-sysroot/usr/lib/aarch64-linux-gnu
+cp -r /usr/include/SDL2 ~/arm64-sdl-sysroot/usr/include/
+cp -r /usr/include/aarch64-linux-gnu/SDL2 ~/arm64-sdl-sysroot/usr/include/aarch64-linux-gnu/
+cp /usr/lib/aarch64-linux-gnu/libSDL2-2.0.so* ~/arm64-sdl-sysroot/usr/lib/aarch64-linux-gnu/
+```
+
+> **Warning:** Do not set `ARM_SDL_SYSROOT="/"`. If pointed to the host root filesystem, the linker searches host `/usr/lib/aarch64-linux-gnu` and links the host's C library, causing a GLIBC version check failure (`Audio bridge requires unexpected glibc version`).
 
 ### Docker
 
@@ -120,6 +157,7 @@ RUN curl -fsSL https://dot.net/v1/dotnet-install.sh | bash -s -- \
     --version 9.0 --install-dir /usr/local/dotnet
 ENV PATH="/usr/local/dotnet:$PATH"
 ENV DOTNET_ROOT="/usr/local/dotnet"
+ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
 
 WORKDIR /work
 ```
@@ -138,6 +176,8 @@ Checks out Mono.Cecil 0.11.5 and builds `coopsplit.dll`, `patchgam.dll`, `skipca
 
 ```bash
 # Linux / WSL
+export DOTNET="$HOME/.dotnet/dotnet"
+export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
 bash build.sh patch-tools ~/sor4-build/patch-tools
 
 # Docker
@@ -154,6 +194,8 @@ Builds the full managed stack: Mono.Cecil, NVorbis, StbImageSharp, MonoGame.Fram
 
 ```bash
 # Linux / WSL
+export DOTNET="$HOME/.dotnet/dotnet"
+export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
 bash build.sh managed-runtime ~/sor4-build/managed
 
 # Docker
@@ -170,6 +212,7 @@ Requires the `aarch64-linux-gnu` cross toolchain and CMake. Builds `libastc-repa
 
 ```bash
 # Linux / WSL
+export PATH="$HOME/aarch64--glibc--stable-2018.11-1/bin:$PATH"
 bash build.sh native-codecs ~/sor4-build/codecs
 
 # Docker
@@ -186,10 +229,17 @@ Builds all components, runs ARM64 ELF and glibc checks, and produces the final i
 
 ```bash
 # Linux / WSL
-export ARM_GLIBC_SYSROOT=/path/to/arm64-glibc-sysroot
-export ARM_SDL_SYSROOT=/path/to/arm64-SDL2-sysroot
-export BUILD_JOBS=8   # optional
+export PATH="$HOME/aarch64--glibc--stable-2018.11-1/bin:$HOME/.dotnet:$PATH"
+export DOTNET="$HOME/.dotnet/dotnet"
+export DOTNET_ROOT="$HOME/.dotnet"
+export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
 
+export ARM_GLIBC_SYSROOT="$HOME/aarch64--glibc--stable-2018.11-1/aarch64-buildroot-linux-gnu/sysroot"
+export ARM_SDL_SYSROOT="$HOME/arm64-sdl-sysroot"
+export BUILD_JOBS=4
+
+# Build directory must be fresh (must not exist)
+rm -rf ~/sor4-build/release
 bash build.sh all ~/sor4-build/release
 
 # Output ZIP: ~/sor4-build/release/streetsofrage4.zip
@@ -199,12 +249,13 @@ bash build.sh all ~/sor4-build/release
 # Docker
 docker run --rm \
   -v "$PWD":/src \
-  -v /path/to/arm64-glibc-sysroot:/sysroot/glibc \
-  -v /path/to/arm64-SDL2-sysroot:/sysroot/sdl2 \
+  -v "$HOME/aarch64--glibc--stable-2018.11-1/aarch64-buildroot-linux-gnu/sysroot":/sysroot/glibc \
+  -v "$HOME/arm64-sdl-sysroot":/sysroot/sdl2 \
   -v ~/sor4-build/release:/out \
+  -e PATH="/sysroot/glibc/../../bin:/usr/local/dotnet:$PATH" \
   -e ARM_GLIBC_SYSROOT=/sysroot/glibc \
   -e ARM_SDL_SYSROOT=/sysroot/sdl2 \
-  -e BUILD_JOBS=8 \
+  -e BUILD_JOBS=4 \
   sor4-builder \
   bash /src/build.sh all /out/build
 
@@ -311,12 +362,15 @@ A successful `all` build stages `submission/` and creates `streetsofrage4.zip`:
 
 ## Troubleshooting
 
-| Problem | Fix |
-| --- | --- |
-| `Use a fresh build directory` | The output path must not already exist. Choose a new path. |
-| `Missing build input: ARM_GLIBC_SYSROOT` | Export `ARM_GLIBC_SYSROOT` and `ARM_SDL_SYSROOT` before running `all` mode. |
-| `requires GLIBC_X.XX … targeting glibc 2.29 or older` | Use the Bootlin AArch64 glibc 2018.11-1 cross toolchain. |
-| `.NET SDK not found` | Set `export DOTNET=/full/path/to/dotnet` or ensure `dotnet` is on `PATH`. |
-| WSL symlink / build errors | Build dir must be on a Linux filesystem (`~/`), not a Windows mount (`/mnt/…`). |
-| `Unexpected source revision for <name>` | Network issue or stale mirror. Re-download or update `PORT_SOURCE_MIRROR`. |
-| `The SDK apphost's entry-point slot differs` | Wrong `sorage4` binary. Rebuild with `all` mode from a fresh directory. |
+| Problem | Cause | Fix |
+| --- | --- | --- |
+| `Use a fresh build directory` | Build output path already exists | Choose a new path or `rm -rf <build-dir>`. |
+| `dotnet: command not found` | .NET SDK path is not in `$PATH` | Set `export DOTNET="$HOME/.dotnet/dotnet"` and `export PATH="$HOME/.dotnet:$PATH"`. |
+| `Couldn't find a valid ICU package installed on the system` | Missing `libicu` on modern/minimal Linux | Run `export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1` or `sudo apt-get install -y libicu-dev`. |
+| `Missing build input: ARM_GLIBC_SYSROOT` | Sysroot path environment variable unset | Export `ARM_GLIBC_SYSROOT` and `ARM_SDL_SYSROOT` before running `all` mode. |
+| `Audio bridge requires unexpected glibc version 2.XX` | `ARM_SDL_SYSROOT` was set to `/` or contains host C libraries | Create an isolated SDL sysroot containing only SDL2 headers and `libSDL2-2.0.so*` (see Sysroot Setup). |
+| `Check for working C compiler ... broken` / `*.br_real: No such file or directory` | Toolchain symlinks located outside toolchain's `bin/` | Put `aarch64-linux-gnu-*` symlinks directly in Bootlin's `bin/` directory so the wrapper resolves `.br_real`. |
+| `requires GLIBC_X.XX … targeting glibc 2.29 or older` | System cross-compiler targets host glibc | Put Bootlin `bin/` in front of `$PATH`: `export PATH="$HOME/aarch64--glibc--stable-2018.11-1/bin:$PATH"`. |
+| WSL symlink / build errors | Building on Windows NTFS mount (`/mnt/…`) | Set build directory to Linux virtual filesystem (`~/build/`). |
+| `Unexpected source revision for <name>` | Network or mirror issue | Re-download or update `PORT_SOURCE_MIRROR`. |
+| `The SDK apphost's entry-point slot differs` | Incompatible apphost binary | Ensure `dotnet publish` completed successfully for `Host.csproj`. |
