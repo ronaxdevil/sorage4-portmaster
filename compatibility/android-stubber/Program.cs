@@ -2,9 +2,14 @@ using System; using System.IO; using System.Linq;
 using Mono.Cecil; using Mono.Cecil.Cil;
 class Stubber {
   static void Main(string[] a){
-    // Usage: AndroidStubber <input.dll> <output.dll>
+    // Usage: AndroidStubber <input.dll> <output.dll> [SOR4Bridge.dll]
     string inp=a[0], outp=a[1];
     using var asm=AssemblyDefinition.ReadAssembly(inp, new ReaderParameters { InMemory = true });
+    if (a.Length == 3) {
+      WireAssetBridge(asm.MainModule, a[2]);
+      asm.Write(outp);
+      return;
+    }
     // retarget corelib: System.Private.CoreLib -> System.Runtime (facade net9, p/ compilar contra os stubs)
     foreach(var r in asm.MainModule.AssemblyReferences){
       if(r.Name=="System.Private.CoreLib"){
@@ -38,6 +43,25 @@ class Stubber {
     asm.Write(outp);
     Console.WriteLine($"{Path.GetFileName(outp)}: {types} tipos, {methods} metodos stubados");
   }
+  static void WireAssetBridge(ModuleDefinition android, string bridgePath) {
+    using var bridge = AssemblyDefinition.ReadAssembly(bridgePath);
+    var assetBridge = bridge.MainModule.GetType("SOR4Bridge.AssetBridge");
+    var assetManager = android.GetType("Android.Content.Res.AssetManager");
+    foreach (var name in new[] { "Open", "List" }) {
+      var target = assetBridge.Methods.Single(m => m.Name == name && m.IsStatic
+          && m.Parameters.Count == 1 && m.Parameters[0].ParameterType.MetadataType == MetadataType.String);
+      var stub = assetManager.Methods.Single(m => m.Name == name && m.HasThis && m.HasBody
+          && m.Parameters.Count == 1 && m.Parameters[0].ParameterType.MetadataType == MetadataType.String
+          && m.ReturnType.FullName == target.ReturnType.FullName);
+      stub.Body.Instructions.Clear();
+      var il = stub.Body.GetILProcessor();
+      il.Emit(OpCodes.Ldarg_1);
+      il.Emit(OpCodes.Call, android.ImportReference(target));
+      il.Emit(OpCodes.Ret);
+    }
+    Console.WriteLine("Android asset Open and List routed to SOR4Bridge.");
+  }
+
   static System.Collections.Generic.IEnumerable<TypeDefinition> AllTypes(ModuleDefinition m){
     foreach(var t in m.Types){ yield return t; foreach(var n in Nested(t)) yield return n; }
   }

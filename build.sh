@@ -110,6 +110,10 @@ PY
   build_managed "$src/compatibility/patches/bridge/Bridge.csproj" SOR4Bridge "$managed" \
     -p:PortableRuntime="$managed"
   mv "$managed/SOR4Bridge.dll" "$managed/SORAGE4Bridge.dll"
+  # Android SDK stubs return null for assets; route Open/List to the Linux asset bridge.
+  "$dotnet" "$out/artifacts/AndroidStubber/result/AndroidStubber.dll" \
+    "$managed/Mono.Android.dll" "$out/generator/Mono.Android.dll" "$managed/SORAGE4Bridge.dll"
+  mv "$out/generator/Mono.Android.dll" "$managed/Mono.Android.dll"
 
   local monogame_archive="${MONOGAME_SOURCE_ARCHIVE:-$out/deps/monogame.tar.gz}"
   if [[ -z "${MONOGAME_SOURCE_ARCHIVE:-}" ]]; then

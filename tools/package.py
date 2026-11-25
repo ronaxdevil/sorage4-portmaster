@@ -95,6 +95,7 @@ def package(stage, target):
                 name = ID + "/" + name
             member = ZipInfo(name, (2026, 11, 8, 0, 0, 0))
             member.create_system = 3
+            # Store POSIX execute bits in the ZIP entry instead of relying on launcher chmod.
             member.external_attr = (stat.S_IFREG | (0o755 if file.name in EXEC else 0o644)) << 16
             archive.writestr(member, file.read_bytes(), compress_type=ZIP_DEFLATED)
     with ZipFile(target) as archive:
