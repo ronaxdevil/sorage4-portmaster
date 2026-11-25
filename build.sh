@@ -103,15 +103,15 @@ with ZipFile(sys.argv[1]) as package:
 PY
   build_managed "$src/compatibility/android-stubber/AndroidStubber.csproj" AndroidStubber "$out/generator" \
     -p:CecilPath="$managed/Mono.Cecil.dll"
-  for assembly in Mono.Android Java.Interop; do
-    "$dotnet" "$out/artifacts/AndroidStubber/result/AndroidStubber.dll" \
-      "$bindings/$assembly.dll" "$managed/$assembly.dll"
-  done
+  local stubber="$out/artifacts/AndroidStubber/result/AndroidStubber.dll"
+  "$dotnet" "$stubber" "$bindings/Java.Interop.dll" "$managed/Java.Interop.dll"
+  "$dotnet" "$stubber" --trim "$src/compatibility/android-stubber/mono-android-api.txt" \
+    "$bindings/Mono.Android.dll" "$managed/Mono.Android.dll"
   build_managed "$src/compatibility/patches/bridge/Bridge.csproj" SOR4Bridge "$managed" \
     -p:PortableRuntime="$managed"
   mv "$managed/SOR4Bridge.dll" "$managed/SORAGE4Bridge.dll"
   # Android SDK stubs return null for assets; route Open/List to the Linux asset bridge.
-  "$dotnet" "$out/artifacts/AndroidStubber/result/AndroidStubber.dll" \
+  "$dotnet" "$stubber" \
     "$managed/Mono.Android.dll" "$out/generator/Mono.Android.dll" "$managed/SORAGE4Bridge.dll"
   mv "$out/generator/Mono.Android.dll" "$managed/Mono.Android.dll"
 

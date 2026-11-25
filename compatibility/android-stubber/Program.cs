@@ -3,13 +3,18 @@ using Mono.Cecil; using Mono.Cecil.Cil;
 class Stubber {
   static void Main(string[] a){
     // Usage: AndroidStubber <input.dll> <output.dll> [SOR4Bridge.dll]
-    string inp=a[0], outp=a[1];
+    //        AndroidStubber --trim <api.txt> <input.dll> <output.dll>
+    bool trim = a.Length == 4 && a[0] == "--trim";
+    if (!trim && a.Length != 2 && a.Length != 3)
+      throw new ArgumentException("Expected input/output DLLs, with an optional bridge or --trim manifest.");
+    string inp = trim ? a[2] : a[0], outp = trim ? a[3] : a[1];
     using var asm=AssemblyDefinition.ReadAssembly(inp, new ReaderParameters { InMemory = true });
     if (a.Length == 3) {
       WireAssetBridge(asm.MainModule, a[2]);
       asm.Write(outp);
       return;
     }
+    if (trim) ApiSurface.Trim(asm.MainModule, a[1]);
     // retarget corelib: System.Private.CoreLib -> System.Runtime (facade net9, p/ compilar contra os stubs)
     foreach(var r in asm.MainModule.AssemblyReferences){
       if(r.Name=="System.Private.CoreLib"){
@@ -33,8 +38,8 @@ class Stubber {
       foreach(var m in t.Methods){
         if(!m.HasBody) continue;
         // pula construtores estaticos? nao - zera tudo p/ evitar init JNI
-        var b=m.Body; b.Instructions.Clear(); b.Variables.Clear(); b.ExceptionHandlers.Clear();
-        b.InitLocals=false;
+        var b=new MethodBody(m);
+        m.Body=b;
         var il=b.GetILProcessor();
         EmitDefault(il, m);
         methods++;

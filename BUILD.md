@@ -192,7 +192,9 @@ docker run --rm \
 
 Builds the full managed stack: Mono.Cecil, NVorbis, StbImageSharp, MonoGame.Framework, SorageVideo, host, Android stubs.
 
-The Android compatibility assembly is built from the pinned .NET Android SDK references. After compiling `SORAGE4Bridge.dll`, the build rewrites `Mono.Android.dll`'s `AssetManager.Open(string)` and `AssetManager.List(string)` stubs to call the Linux asset bridge. Keep this post-processing step: the generated reference stubs otherwise return `null` from `Open`, which crashes during initial game asset loading.
+The build generates a compact `Mono.Android.dll` from the pinned .NET Android SDK using [the Android API list](compatibility/android-stubber/mono-android-api.txt). The list covers the supported Epic Android 1.4.10 assemblies and the port. The generator retains the base types, interfaces, and signature types required by those APIs. A fresh build uses the API list and pinned SDK package without needing the APK or a previous ZIP.
+
+After compiling `SORAGE4Bridge.dll`, the build routes `AssetManager.Open(string)` and `AssetManager.List(string)` through the Linux asset bridge. When adding a supported game build or changing Android calls in the port, review the API list for direct references, overrides, and members accessed by name before rebuilding.
 
 ```bash
 # Linux / WSL
